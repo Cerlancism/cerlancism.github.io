@@ -1,0 +1,846 @@
+<!doctype html> 
+<head>	
+	<meta charset="UTF-8" />
+	<title>Devil's Underground Tower Defence</title>
+    <!--import-->
+	<script type="text/javascript" src="js/phaser.js"></script>
+	<script type="text/javascript" src="js/tower.js"></script>
+	<script type="text/javascript" src="js/trap.js"></script>
+	<script type="text/javascript" src="js/enemy.js"></script>
+	<script type="text/javascript" src="js/bullet.js"></script>
+    <script type="text/javascript" src="js/astar.js"></script>
+
+</head>
+<body>
+<script type="text/javascript">
+//create game screen
+var game = new Phaser.Game(832, 640, Phaser.CANVAS, 'phaser-example', {  preload: preload, create: create, update: update, render: render });
+
+function preload() {
+
+    //load images/tilemaps and spritesheets
+    game.load.image('background', 'images/background.png');
+	game.load.image('startBtn', 'images/start.png',320,45);
+	game.load.image('helpBG', 'images/helpBG.png',320,45);
+	game.load.image('helpBtn', 'images/help.png',320,45);
+	game.load.image('backBtn', 'images/back.png',320,45);
+	
+	game.load.tilemap('tilemap', 'js/tilemap.json', null, Phaser.Tilemap.TILED_JSON);
+    game.load.image('tileset', 'images/tileset.png');
+	game.load.image('HUD','images/HUD.png')
+	
+	game.load.spritesheet('Devil', 'images/Devil.png', 32, 48, 16);
+	game.load.spritesheet('enemy1', 'images/Meattank.png', 64, 64, 45);
+	game.load.spritesheet('enemy2', 'images/hero.png', 64, 64, 45);
+	game.load.spritesheet('Towers', 'images/towers.png', 64, 64, 15);
+	game.load.spritesheet('Traps', 'images/traps.png', 64, 64, 20);
+	game.load.spritesheet('Bullets', 'images/bullets.png', 64, 64, 15);
+	
+	game.load.audio('mainMenu', ['music/mainMenu.mp3']);
+	game.load.audio('gameMusic', ['music/game.mp3']);
+	game.load.audio('optionsMusic', ['music/options.mp3']);
+
+}
+var mainMenuMusic;
+var gameMusic;
+var optionsMusic;
+
+var startBtn;	//Button Start button
+var helpBtn; //Button help button
+var backBtn;
+
+var map;		//Map tilemap
+var layer;		//Layer collision layer
+
+var currentTile;//Tile Pos current tile in front of player
+var marker;		//Marker marker for current tile
+
+var gameScreen;//Bool is it in gamescreen
+var buildStage;//Bool is it in building stage
+
+var devil;	   //Player
+var enemyArray=[];//enemy array to track all enemies
+var HUD;	   //HUD at bottom of game scren
+
+var gold;	   //current gold
+var towerArray=[];
+var trapArray=[];//tower array to track all towesr
+var facing=0;  //direction player is facing
+
+var waveNo=0; 	//wave number
+var result=[];	//A* result
+var bulletArray=[];//Bullet Array
+
+var isDown;
+var style;
+var healthStyle;
+var goldText;
+var spawning;
+var digs
+var digText;
+var health=10;
+var healthText;
+var trapTimer;
+var loseStyle;
+var loseText;
+var helpText;
+var helpStyle;
+var waveText;
+var waveStyle;
+
+function create() {
+	//Background Color
+    game.stage.backgroundColor = '#182d3b';
+	//Start Physics
+	game.physics.startSystem(Phaser.Physics.ARCADE);
+	
+    //Background
+    background = game.add.image(0, 0, 'background');
+
+	//Start and help Button
+	startBtn = game.add.button(260 , 420, 'startBtn', onStart, this, 2, 1, 0);
+	helpBtn = game.add.button(260 , 520, 'helpBtn', onOption, this, 2, 1, 0);
+	backBtn=game.add.button(260 , 450, 'backBtn', onBack, this, 2, 1, 0);
+	
+	backBtn.visible =!backBtn.visible;
+	//Set starting Gold
+	gold=150;
+	digs=10;
+	
+	mainMenuMusic=game.add.audio('mainMenu',1,true);
+	mainMenuMusic.play('',0,1,true);
+	
+	helpStyle = { font: "30px Arial", fill: "#000000", align: "center" };
+}
+
+function update() {
+	
+	if (game.input.activePointer.isDown&& (health<=0||waveNo==10)){
+		resetGame();
+		}
+	//If in Game Screen
+	if(gameScreen){
+		
+		healthText.setText(health);
+		if(health<=0){
+					gameScreen=false;
+					for(var i=0;i<enemyArray.length;i++){
+						enemyArray[i].getSprite().body.velocity.set(0);
+						enemyArray[i].getSprite().animations.stop();
+					}
+					loseStyle = { font: "48px Arial", fill: "#FF0000", align: "center" };
+   					loseText = game.add.text(100, 200,"You Lose!\n Click anywhere to restart", loseStyle);
+					
+					
+				}
+		//Build Stage
+		if(buildStage){
+			game.physics.arcade.collide(devil, layer); 
+			
+			goldText.setText(gold);
+			digsText.setText(digs);
+			
+			//Reset movement
+			devil.body.velocity.set(0);
+			//movement and setting facing direction
+			if (game.input.keyboard.isDown(Phaser.Keyboard.LEFT))
+			{
+				devil.animations.play('walkLeft');
+				devil.body.velocity.x = -150;
+				facing=0;
+			}
+			else if (game.input.keyboard.isDown(Phaser.Keyboard.RIGHT))
+			{
+				devil.animations.play('walkRight');
+				devil.body.velocity.x = 150;
+				facing=2;
+			}
+			else if (game.input.keyboard.isDown(Phaser.Keyboard.UP))
+			{
+				devil.animations.play('walkUp');
+				devil.body.velocity.y = -150;
+				facing=1;
+			}
+			else if (game.input.keyboard.isDown(Phaser.Keyboard.DOWN))
+			{
+				devil.animations.play('walkDown');
+				if(devil.body.position.y<448)
+				devil.body.velocity.y = 150;
+				facing=3;
+			}
+			//stop animations when movement stops
+			else
+			{
+				devil.animations.stop();
+			}
+		
+				dig();
+			
+			//check for tower placement button pressed
+			checkTowerInput();
+			
+			//check for tower placement button pressed
+			checkTrapInput();
+			
+			if(game.input.keyboard.isDown(Phaser.Keyboard.U)){
+				if(!(isDown)){
+					isDown=true;
+					
+						for(var i=0;i<towerArray.length;i++){
+							if(towerArray[i].getPosX()==marker.x&&towerArray[i].getPosY()==marker.y){
+								switch(towerArray[i].getType()){
+									case(0):if(gold>=150){
+												gold-=150;
+												towerArray[i].upgradeTower();
+												break;
+											}
+									case(1):if(gold>=200){
+												gold-=200;
+												towerArray[i].upgradeTower();
+												break;
+											}
+									case(3):if(gold>=200){
+												gold-=200;
+												towerArray[i].upgradeTower();
+												break;
+											}
+									case(4):if(gold>=300){
+												gold-=300;
+												towerArray[i].upgradeTower();
+												break;
+											}
+									case(6):if(gold>=200){
+												gold-=200;
+												towerArray[i].upgradeTower();
+												break;
+											}
+									case(7):if(gold>=450){
+												gold-=450;
+												towerArray[i].upgradeTower();
+												break;
+											}
+									case(9):if(gold>=250){
+												gold-=250;
+												towerArray[i].upgradeTower();
+												break;
+											}
+									case(10):if(gold>=500){
+												gold-=500;
+												towerArray[i].upgradeTower();
+												break;
+											}
+									case(12):if(gold>=3500){
+												gold-=3500;
+												towerArray[i].upgradeTower();
+												break;
+											}
+									case(13):if(gold>=4500){
+												gold-=4500;
+												towerArray[i].upgradeTower();
+												break;
+											}
+									
+									}
+							}
+						}
+					window.setTimeout(function() {
+						isDown=false;
+					},1000);
+				}
+			}
+			if(game.input.keyboard.isDown(Phaser.Keyboard.P)){
+			 	
+				buildStage=false;
+				spawning=true;
+				spawnWave();					
+				buildAStar();
+			}
+		}
+		else{
+				//Wave Stage
+				waveText.setText("Wave: "+waveNo);
+				trapTimer = Math.floor(game.time.time) % 1000;
+				
+				devil.body.velocity.set(0);
+				devil.animations.stop();
+				
+				for(var i=0;i<enemyArray.length;i++){
+											
+					enemyArray[i].move();
+					if(enemyArray[i].getCurrWaypoint()==result.length){
+						health--;
+					}
+					
+					if(enemyArray[i].getHP()<=0 ||enemyArray[i].getCurrWaypoint()==result.length){
+						enemyArray[i].killSprite();
+						enemyArray.splice(i,1);
+					}
+					
+				}
+				
+				towerShoot();
+				for(var i=0;i<bulletArray.length;i++){
+					if(bulletArray[i].move()){
+						for(var j =0;j<enemyArray.length;j++){							
+								switch(bulletArray[i].getType()){
+									case(4):
+									if(Math.abs(bulletArray[i].getSprite().x-enemyArray[j].getPosX())<50 && Math.abs(bulletArray[i].getSprite().y-enemyArray[j].getPosY())<50){
+										enemyArray[j].minusHP(0.3);
+										enemyArray[j].setSpeed(0.65);
+										enemyArray[j].getSprite().tint=0x00AAFF;
+										}
+											break;
+									case(5):
+									if(Math.abs(bulletArray[i].getSprite().x-enemyArray[j].getPosX())<100 && Math.abs(bulletArray[i].getSprite().y-enemyArray[j].getPosY())<100){
+										enemyArray[j].minusHP(0.35);		
+										enemyArray[j].setSpeed(0.5);
+										enemyArray[j].getSprite().tint=0x0059FF;
+										}
+											break;
+									case(9):
+									if(Math.abs(bulletArray[i].getSprite().x-enemyArray[j].getPosX())<50 && Math.abs(bulletArray[i].getSprite().y-enemyArray[j].getPosY())<50){
+										enemyArray[j].minusHP(0.5);
+										}
+											break;
+									case(10):
+									if(Math.abs(bulletArray[i].getSprite().x-enemyArray[j].getPosX())<100 && Math.abs(bulletArray[i].getSprite().y-enemyArray[j].getPosY())<100){
+										enemyArray[j].minusHP(0.6);
+										}
+											break;
+									case(11):
+									if(Math.abs(bulletArray[i].getSprite().x-enemyArray[j].getPosX())<150 && Math.abs(bulletArray[i].getSprite().y-enemyArray[j].getPosY())<150){
+										enemyArray[j].minusHP(0.7);
+										}
+										break;
+								}
+								
+							}	
+					bulletArray.splice(i,1);
+					}			
+				}	
+				for(var i=0;i<trapArray.length;i++){
+					for(var j =0;j<enemyArray.length;j++){
+						if(Math.abs(trapArray[i].getPosX()-enemyArray[j].getPosX())<33 && Math.abs(trapArray[i].getPosY()-enemyArray[j].getPosY())<33){
+							switch(trapArray[i].getType()){
+								case(0):enemyArray[j].minusHP(0.01);
+										break;
+								case(4):if(trapTimer>=500){
+											enemyArray[j].getSprite().body.velocity.set(0);
+										}															
+										break;
+								case(8):enemyArray[j].getSprite().tint=0xFF0000;
+										enemyArray[j].dmgOverTime(0.1);
+										enemyArray[i].updateDmgOT();
+										break;
+								case(12):enemyArray[j].getSprite().tint=0x00FF08;
+										 enemyArray[j].dmgOverTime(0.05);
+										 enemyArray[j].setSpeed(0.8);
+										 enemyArray[i].updateDmgOT();
+										break;
+								case(16):enemyArray[j].getSprite().tint=0x00B3FF;
+										enemyArray[j].setSpeed(0.7);
+										break;
+							
+							}
+				
+						}
+					}
+				
+				}
+				
+				
+				
+				
+				if(!spawning&&enemyArray.length==0){
+					buildStage=true;
+					gold+=(100+(waveNo*20));
+					digs+=3;
+					if(waveNo==10){
+						gameScreen=false;
+						for(var i=0;i<enemyArray.length;i++){
+							enemyArray[i].getSprite().body.velocity.set(0);
+							enemyArray[i].getSprite().animations.stop();
+						}
+						loseStyle = { font: "48px Arial", fill: "#FF0000", align: "center" };
+						loseText = game.add.text(100, 200,"You Win!\n Click anywhere to restart", loseStyle);
+						}
+					}
+			}
+	}
+}
+
+function onStart () {
+	//hide mainmenu screen
+    background.visible =! background.visible;
+	startBtn.visible =! startBtn.visible;
+	helpBtn.visible =! helpBtn.visible;
+	//set gamescreen and build stage to true
+	gameScreen=true;
+	buildStage=true;
+	
+	//Tilemap
+	map = game.add.tilemap('tilemap', 64, 64);
+    //Tileset
+    map.addTilesetImage('tileset');
+   	//Creating Collision Layer
+    layer = map.createLayer('Tile Layer 1');
+    //Setting types of tiles that will cause collision
+	map.setCollisionBetween(1,2);
+	map.setCollisionBetween(5,7);
+	
+   	//Create devil and add animations and physics
+  	devil = game.add.sprite(32, 224, 'Devil');
+	game.physics.enable(devil,Phaser.Physics.ARCADE);
+	devil.anchor.set(0.5);
+	devil.scale.set(1.2);		
+	devil.animations.add('walkDown',[0,1,2,3],4,false);
+	devil.animations.add('walkLeft',[4,5,6,7],4,false);
+	devil.animations.add('walkRight',[8,9,10,11],4,false);
+	devil.animations.add('walkUp',[12,13,14,15],4,false);
+	devil.body.collideWorldBounds=true;
+	
+	//creates marker
+	marker = game.add.graphics();
+	marker.lineStyle(2, 0x000000, 1);
+	marker.drawRect(0, 0, 64, 64);
+		
+		
+	HUD = game.add.sprite(0, 512, 'HUD');
+	
+    style = { font: "12px Arial", fill: "#FFCC00", align: "center" };
+	healthStyle = { font: "16px Arial", fill: "#FF0000", align: "center" };
+	waveStyle = { font: "20px Arial", fill: "#FF0000", align: "center" };
+
+    goldText = game.add.text(660, 600, gold, style);
+    digsText = game.add.text(725, 600, digs, style);
+    healthText = game.add.text(770, 565, health, healthStyle);
+	waveText = game.add.text(35, 35, "Wave: "+waveNo, waveStyle);
+	mainMenuMusic.stop();
+	gameMusic=game.add.audio('gameMusic',1,true);
+	gameMusic.play('',0,1,true);
+	}
+	
+function onOption(){
+	//hide main menu screens
+	//background.visible =! background.visible;
+	startBtn.visible =! startBtn.visible;
+	helpBtn.visible =! helpBtn.visible;
+	backBtn.visible =!backBtn.visible;
+	
+
+	background = game.add.image(0, 0, 'helpBG')
+	helpText = game.add.text(80, 100, "Tips\nOnce you build a tower, that spot cannot be dug out.\nSo plan your tower placements well.\nSlows do not stack. The higher slow will take effect.\nPress P to start each level.\nLook at a tower and press U to upgrade it.\nSurvive to wave 10 to win the game.\nWhen you start a level you cannot move so be warned.", helpStyle);
+		
+	mainMenuMusic.stop();
+	optionsMusic=game.add.audio('optionsMusic',1,true);
+	optionsMusic.play('',0,1,true);
+	
+	game.world.bringToTop(backBtn);
+}
+
+function onBack(){
+	startBtn.visible =! startBtn.visible;
+	helpBtn.visible =! helpBtn.visible;
+	backBtn.visible =!backBtn.visible;
+	
+	background = game.add.image(0, 0, 'background');
+	game.world.bringToTop(background);
+	game.world.bringToTop(startBtn);
+	game.world.bringToTop(helpBtn);
+	
+	optionsMusic.stop();
+	mainMenuMusic=game.add.audio('mainMenu',1,true);
+	mainMenuMusic.play('',0,1,true);
+	
+}
+
+function dig(){
+		
+		//snap marker to square
+		marker.x = (Math.floor(devil.x/64))*64;
+		marker.y = (Math.floor(devil.y/64))*64;
+		
+		//move marker 1 square over where he is facing
+		if(facing==0){
+			marker.x-=64;
+		}
+		else if(facing==1){
+			marker.y-=64
+		}
+		else if(facing==2){
+			marker.x +=64;
+			if(marker.x>768){
+				marker.x=768;
+			}
+		}
+		else if(facing==3){
+			marker.y+=64;
+			if(marker.y>448){
+				marker.y=448;
+			}
+		}
+		// if space is pressed Dig if possible
+		if (game.input.keyboard.isDown(Phaser.Keyboard.SPACEBAR))
+		{
+			var gotTower=false;
+			
+			if(!(isHole(marker.x,marker.y))){
+				for(var i=0;i<towerArray.length;i++){
+					if(towerArray[i].getPosX()==marker.x&&towerArray[i].getPosY()==marker.y){
+						//check if it is a hole and decide which hole type to use
+						gotTower=true
+						break;
+					}
+					else{
+						gotTower=false;	
+					}
+				}
+				if(!gotTower){
+					checkHole(false);
+				}
+			}
+		}
+}
+			
+function buildTower(tempInt){
+	
+	if(marker.x>768){
+		marker.x=768;
+	}
+	if(marker.y>448){
+		marker.y=448;
+	}
+	
+	var tileX=marker.x;
+	var tileY=marker.y;
+	
+	var gotTower=false;
+	
+	for(var i =0;i<towerArray.length;i++){
+		if(towerArray[i].getPosX()==tileX && towerArray[i].getPosY()==tileY){
+			gotTower=true;
+			break;
+			}else{
+			 gotTower=false;
+			 }
+		}
+	
+	if (!(isHole(tileX,tileY))&& !gotTower){
+		switch(tempInt){
+			case(0):
+					gold-=100;
+					towerArray.push(new tower(tempInt,tileX,tileY));
+					break;
+			case(3):
+			case(6):
+			case(9):gold-=150;
+					towerArray.push(new tower(tempInt,tileX,tileY));
+					break;
+			case(12):gold-=2000;
+					towerArray.push(new tower(tempInt,tileX,tileY));
+					break;
+		}
+	}
+}
+
+function checkTowerInput()
+{
+	if (game.input.keyboard.isDown(Phaser.Keyboard.Q))
+	{
+		if(gold>=100){
+			buildTower(0);
+		}
+	}
+	else if (game.input.keyboard.isDown(Phaser.Keyboard.W))
+	{
+		if(gold>=150){
+			buildTower(3);
+		}	
+	}
+	else if (game.input.keyboard.isDown(Phaser.Keyboard.E))
+	{
+		if(gold>=150){
+			buildTower(6);
+		}
+	}
+	else if (game.input.keyboard.isDown(Phaser.Keyboard.R))
+	{
+		if(gold>=150){
+			buildTower(9);
+		}
+	}
+	else if (game.input.keyboard.isDown(Phaser.Keyboard.T))
+	{
+		if(gold>=2000){
+			buildTower(12);
+		}
+	}
+}
+
+function checkTrapInput()
+{
+	if(gold>=100){
+		if (game.input.keyboard.isDown(Phaser.Keyboard.A))
+		{
+				buildTrap(0);
+		}
+		else if (game.input.keyboard.isDown(Phaser.Keyboard.S))
+		{
+				buildTrap(4);
+		}
+		else if (game.input.keyboard.isDown(Phaser.Keyboard.D))
+		{
+				buildTrap(8);
+		}
+		else if (game.input.keyboard.isDown(Phaser.Keyboard.F))
+		{
+				buildTrap(12);
+		}
+		else if (game.input.keyboard.isDown(Phaser.Keyboard.G))
+		{
+				buildTrap(16);
+		}
+	}
+}
+function buildTrap(tempInt){
+	
+	if(marker.x>768){
+		marker.x=768;
+	}
+	if(marker.y>448){
+		marker.y=448;
+	}
+	
+	var tileX=marker.x;
+	var tileY=marker.y;
+	
+	var gotTrap=false;
+	
+	for(var i =0;i<trapArray.length;i++){
+		if(trapArray[i].getPosX()==tileX && trapArray[i].getPosY()==tileY){
+			gotTrap=true;
+			break;
+			}else{
+			 gotTrap=false;
+			 }
+		}
+	
+	if ((isHole(tileX,tileY))&& !gotTrap){
+		gold-=100;
+		trapArray.push(new trap(tempInt,tileX,tileY));
+	}
+}
+function checkHole(isNeighbourHole){
+	
+	//move marker in if it is out of map
+	if(marker.x>768){
+	marker.x=768;}
+	if(marker.y>448){
+	marker.y=448;}
+	
+	//sets marker to tileX and Y
+	var tileX=marker.x;
+	var tileY=marker.y;
+	
+	//check neighbouring tiles for holes
+	if(marker.x>0){
+	var tileLeftHole=isHole(tileX-64,tileY);
+	}
+	if(marker.y>0){
+	var tileTopHole=isHole(tileX,tileY-64);
+	}
+	if(marker.x<767){
+	var tileRightHole=isHole(tileX+64,tileY);
+	}
+	if(marker.y<447){
+	var tileBotHole=isHole(tileX,tileY+64);
+	}
+	
+	//if neighbouring tiles have holes choose which tile to use
+	if(tileLeftHole&&tileTopHole&&tileRightHole&&tileBotHole){
+		currentTile = 8;
+	}else if(tileBotHole&&tileTopHole&&tileRightHole){
+		currentTile=16;	
+	}else if(tileLeftHole&&tileTopHole&&tileRightHole){
+		currentTile=15;	
+	}else if(tileLeftHole&&tileTopHole&&tileBotHole){
+		currentTile=14;	
+	}else if(tileLeftHole&&tileBotHole&&tileRightHole){
+		currentTile=13;	
+	}else if(tileLeftHole&&tileTopHole){
+		currentTile=12
+	}else if(tileLeftHole&&tileBotHole){
+		currentTile=11
+	}else if(tileRightHole&&tileBotHole){
+		currentTile=10
+	}else if(tileRightHole&&tileTopHole){
+		currentTile=9
+	}else if(tileBotHole||tileTopHole){
+		currentTile=4
+	}else if(tileLeftHole||tileRightHole){
+		currentTile=3
+	}
+	
+	//place that tile
+	if(!isNeighbourHole){
+		if(digs>0){
+		map.putTile(currentTile, layer.getTileX(marker.x), layer.getTileY(marker.y));
+		}
+	}else{
+		map.putTile(currentTile, layer.getTileX(marker.x), layer.getTileY(marker.y));
+	}
+	
+	//update neighbouring tiles
+	//if statement to ensure that it is only done once as it is a recusive method that calls itself
+	if(!isNeighbourHole){
+		if(digs>0){
+			digs--;
+		}
+		//ensures that it doesnt move marker out of map if dug hole is at sides
+		if(tileTopHole&&marker.y!=0){
+			marker.y-=64;
+			checkHole(true);
+			marker.y+=64;
+		}
+		//ensures that it doesnt move marker out of map if dug hole is at sides
+		if(tileLeftHole&&marker.x!=0){
+			marker.x-=64;
+			checkHole(true);
+			marker.x+=64;
+		}
+		//ensures that it doesnt move marker out of map if dug hole is at sides
+		if(tileRightHole&&marker.x!=768){
+		//ensures that it doesnt move marker out of map if dug hole is at sides
+			marker.x+=64;
+			checkHole(true);
+			marker.x-=64;
+		}
+		if(tileBotHole&&marker.y!=448){
+		//ensures that it doesnt move marker out of map if dug hole is at sides
+			marker.y+=64;
+			checkHole(true);
+			marker.y-=64;		
+		}
+	}
+}
+
+function isHole(tileX,tileY){
+	
+		//checks if tile is a hole
+		if(map.getTile(layer.getTileX(tileX), layer.getTileY(tileY)).index ==1 
+		|| map.getTile(layer.getTileX(tileX), layer.getTileY(tileY)).index ==2
+		|| map.getTile(layer.getTileX(tileX), layer.getTileY(tileY)).index ==5
+		|| map.getTile(layer.getTileX(tileX), layer.getTileY(tileY)).index ==6
+		|| map.getTile(layer.getTileX(tileX), layer.getTileY(tileY)).index ==7)
+		
+		return false;	
+		
+		else 
+		return true;
+	
+	
+}
+
+function towerShoot(){
+	for(var i=0;i<towerArray.length;i++){
+		for(var j=0;j<enemyArray.length;j++){
+			if(Math.abs(towerArray[i].getPosX()-enemyArray[j].getPosX())<192 && Math.abs(towerArray[i].getPosY()-enemyArray[j].getPosY())<192){
+				if(towerArray[i].fireBullet()){
+					bulletArray.push(new bullet(towerArray[i].getPosX(),towerArray[i].getPosY(),enemyArray[j],towerArray[i].getType()));
+				}
+			}
+		}
+	}
+	
+	
+	
+	
+	
+}
+
+function buildAStar(){
+	//A* pathfinding
+	
+	//creating grid
+	var grid=[];
+	for(var i=0;i<13;i++){
+		var tempXGrid=[];
+		for(var j=0;j<8;j++){
+			if(isHole(i*64,j*64)){
+				tempXGrid[j] = 1;
+			}
+			else{
+				tempXGrid[j] = 0;	
+			}
+		}
+		grid[i] = tempXGrid;
+	}
+	var graph = new Graph(grid);
+	
+	var start = graph.grid[0][3];
+    var end = graph.grid[Math.floor(devil.x/64)][Math.floor(devil.y/64)];
+    result = astar.search(graph, start, end);
+    // result is an array containing the shortest path
+	
+	
+}
+function spawnWave(){
+	
+	waveNo++;
+	var i=0;
+	var interval = window.setInterval(function() {
+		if(i<waveNo*4+8){
+			enemyArray.push(new enemy(waveNo,result));
+			i++;
+		}else{
+			spawning=false;
+			interval = window.clearInterval(interval);
+			}
+	}, 2000);
+}
+
+function resetGame(){
+	//hide mainmenu screen
+    background.visible =! background.visible;
+	startBtn.visible =! startBtn.visible;
+	helpBtn.visible =! helpBtn.visible;
+	map=null;
+	
+	game.world.bringToTop(background);
+	game.world.bringToTop(startBtn);
+	game.world.bringToTop(helpBtn);
+	
+	devil.kill();
+	HUD.kill();
+	health=10;
+	gold=150;
+	digs=10;
+	waveNo=0;
+	
+	goldText.setText="";
+	digsText.setText="";
+	healthText.setText="";
+	loseText.setText="";
+	waveText.setText="";
+	
+	for(var i =0;i<towerArray.length;i++){
+		towerArray[i].getSprite().kill();
+		towerArray.splice(i,1);
+		}
+	for(var i =0;i<enemyArray.length;i++){
+		enemyArray[i].getSprite().kill();
+		enemyArray.splice(i,1);
+		}	
+	for(var i =0;i<bulletArray.length;i++){
+		bulletArray[i].getSprite().kill();
+		bulletArray.splice(i,1);
+		}
+}
+
+
+
+function render() {
+//	game.debug.spriteInfo(devil, 35,35);
+}
+</script>
+</body>
